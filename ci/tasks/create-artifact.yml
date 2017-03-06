@@ -1,0 +1,18 @@
+---
+
+platform: linux
+
+image_resource:
+  type: docker-image
+  source:
+    repository: alpine
+
+inputs:
+  - name: source-code-with-dependencies
+
+outputs:
+  - name: release-artifact
+
+run:
+  path: ci/scripts/create-artifact.sh
+  dir: source-code-with-dependencies

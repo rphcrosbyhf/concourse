@@ -1,0 +1,16 @@
+---
+
+platform: linux
+
+image_resource:
+  type: docker-image
+  source:
+    repository: php
+    tag: 7.1.2-cli
+
+inputs:
+- name: source-code-with-dependencies
+
+run:
+  path: ci/scripts/run-unit-tests.sh
+  dir: source-code-with-dependencies

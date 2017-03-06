@@ -34,7 +34,7 @@ resources:
 
 # Quay.io
 #-----------------------------------------------------------------------------------------------------------------------
-- name: quay-image
+- name: quay
   type: docker-image
   source:
     repository: {{quay_repository}}
@@ -145,6 +145,9 @@ jobs:
     # Create a release artifact
     - task: create-artifact
       file: source-code-with-dependencies/ci/tasks/create-artifact.yml
+      params:
+        RELEASE_ARTIFACT: {{github_repo}}
+        RELEASE_DIRECTORIES: {{github_release_directories}}
 
     # Bump the patch version
     - put: version
@@ -181,8 +184,8 @@ jobs:
     - task: extract-release
       file: source-code/ci/tasks/extract-release.yml
 
-    # Upload the release to quay.io
-    - put: quay-image
+    # Upload the release to quay
+    - put: quay
       params:
         build: release-artifact
         tag: version/version
