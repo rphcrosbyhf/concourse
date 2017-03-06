@@ -1,0 +1,281 @@
+---
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resource Types
+#-----------------------------------------------------------------------------------------------------------------------
+resource_types:
+
+# Notification
+#-----------------------------------------------------------------------------------------------------------------------
+- name: notification
+  type: docker-image
+  source:
+    repository: quay.io/hellofresh/slack-notification-resource
+
+# Release
+#-----------------------------------------------------------------------------------------------------------------------
+- name: release
+  type: docker-image
+  source:
+    repository: quay.io/hellofresh/gh-status-dynamic
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resources
+#-----------------------------------------------------------------------------------------------------------------------
+resources:
+
+# Source Code
+#-----------------------------------------------------------------------------------------------------------------------
+- name: source-code
+  type: git
+  source:
+    uri: {{github_repo_uri}}
+    branch: master
+
+# Quay.io
+#-----------------------------------------------------------------------------------------------------------------------
+- name: quay-image
+  type: docker-image
+  source:
+    repository: {{quay_repository}}
+    username: {{quay_username}}
+    password: {{quay_password}}
+
+# Slack
+#-----------------------------------------------------------------------------------------------------------------------
+- name: slack
+  type: notification
+  source:
+    url: {{slack_url}}
+
+# Releases
+#-----------------------------------------------------------------------------------------------------------------------
+- name: release
+  type: release
+  source:
+    user: hellofresh
+    repository: {{github_repo}}
+    access_token: {{github_token}}
+
+# Automation
+#-----------------------------------------------------------------------------------------------------------------------
+- name: automation
+  type: release
+  source:
+    user: hellofresh
+    repository: automation
+    access_token: {{github_token}}
+
+# Version
+#-----------------------------------------------------------------------------------------------------------------------
+- name: version
+  type: semver
+  source:
+    driver: git
+    initial_version: 0.1.0
+    uri: {{github_repo_uri}}
+    branch: version
+    file: version
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Groups
+#-----------------------------------------------------------------------------------------------------------------------
+groups:
+
+# Build
+#-----------------------------------------------------------------------------------------------------------------------
+- name: test
+  jobs:
+    - run-unit-tests
+
+# Release
+#-----------------------------------------------------------------------------------------------------------------------
+- name: release
+  jobs:
+    - create-release
+
+# Run
+#-----------------------------------------------------------------------------------------------------------------------
+- name: deploy
+  jobs:
+    - quay-deployment
+    - staging-deployment
+    - production-deployment
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Jobs
+#-----------------------------------------------------------------------------------------------------------------------
+jobs:
+
+# Unit Tests
+#-----------------------------------------------------------------------------------------------------------------------
+- name: run-unit-tests
+  public: false
+  serial: true
+  plan:
+
+    # Trigger unit tests when a PR is submitted
+    - get: source-code
+      trigger: true
+
+    # Install test dependencies
+    - task: install-test-dependencies
+      file: source-code/ci/tasks/install-test-dependencies.yml
+
+    # Run unit tests
+    - task: unit-tests
+      file: source-code-with-dependencies/ci/tasks/run-unit-tests.yml
+
+# Releases
+#-----------------------------------------------------------------------------------------------------------------------
+- name: create-release
+  public: false
+  serial: true
+  plan:
+
+    # Create releases when unit tests have passed
+    - get: source-code
+      trigger: true
+      passed: [run-unit-tests]
+
+    # Install dependencies
+    - task: install-dependencies
+      file: source-code/ci/tasks/install-dependencies.yml
+
+    # Create a release artifact
+    - task: create-artifact
+      file: source-code-with-dependencies/ci/tasks/create-artifact.yml
+
+    # Bump the patch version
+    - put: version
+      params:
+        bump: patch
+
+    # Upload a release to GitHub
+    - put: release
+      params:
+        name: version/version
+        tag: version/version
+        globs:
+          - {{github_release_artifact}}
+
+# Quay Deployments
+#-----------------------------------------------------------------------------------------------------------------------
+- name: quay-deployment
+  public: false
+  serial: true
+  plan:
+
+    # Get the latest release
+    - get: release
+      trigger: true
+      passed: [create-release]
+
+    # Get the source code
+    - get: source-code
+
+    # Get the current version
+    - get: version
+
+    # Extract the release
+    - task: extract-release
+      file: source-code/ci/tasks/extract-release.yml
+
+    # Upload the release to quay.io
+    - put: quay-image
+      params:
+        build: release-artifact
+        tag: version/version
+        tag_as_latest: true
+
+# Staging Deployments
+#-----------------------------------------------------------------------------------------------------------------------
+- name: staging-deployment
+  public: false
+  serial: true
+  plan:
+
+  # Get the current version
+  - get: version
+
+  # Get the latest release once one has been created
+  - get: release
+    trigger: true
+    passed: [create-release]
+
+  # Get the source code
+  - get: source-code
+
+  # Get automation
+  - get: automation
+
+  # Deploy the release to staging
+  - task: deploy
+    file: source-code/ci/tasks/deploy-staging.yml
+    params:
+      DEPLOYMENT_PRIVATE_KEY: {{automation_private_key}}
+      DEPLOYMENT_ENVIRONMENT: staging
+      VPASS: {{automation_vpass}}
+
+  # Send slack notification on failure
+  on_failure:
+    put: slack-alert
+    params:
+      channel: {{slack_channel}}
+      username: {{slack_username}}
+      text_file: version/version
+      text: {{slack_staging_failure}}
+
+  # Send slack notification on success
+  on_success:
+    put: slack-alert
+    params:
+      channel: {{slack_channel}}
+      username: {{slack_username}}
+      text_file: version/version
+      text: {{slack_staging_success}}
+
+# Production Deployments
+#-----------------------------------------------------------------------------------------------------------------------
+- name: production-deployment
+  public: false
+  serial: true
+  plan:
+
+  # Get the current version
+  - get: version
+
+  # Get the latest release
+  - get: release
+
+  # Get the source code
+  - get: source-code
+
+  # Get automation
+  - get: automation
+
+  # Deploy the release to staging
+  - task: deploy
+    file: source-code/ci/tasks/deploy-production.yml
+    params:
+      DEPLOYMENT_PRIVATE_KEY: {{automation_private_key}}
+      DEPLOYMENT_ENVIRONMENT: staging
+      VPASS: {{automation_vpass}}
+
+  # Send slack notification on failure
+  on_failure:
+    put: slack-alert
+    params:
+      channel: {{slack_channel}}
+      username: {{slack_username}}
+      text_file: version/version
+      text: {{slack_production_failure}}
+
+  # Send slack notification on success
+  on_success:
+    put: slack-alert
+    params:
+      channel: {{slack_channel}}
+      username: {{slack_username}}
+      text_file: version/version
+      text: {{slack_production_success}}

@@ -23,7 +23,6 @@ resources:
   type: pull-request
   source:
     uri: {{github_repo_uri}}
-    repo: {{github_repo}}
     access_token: {{github_token}}
 
 #-----------------------------------------------------------------------------------------------------------------------
