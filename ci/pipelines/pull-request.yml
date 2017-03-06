@@ -1,0 +1,121 @@
+---
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resource Types
+#-----------------------------------------------------------------------------------------------------------------------
+resource_types:
+
+# Pull Request
+#-----------------------------------------------------------------------------------------------------------------------
+- name: pull-request
+  type: docker-image
+  source:
+    repository: jtarchie/pr
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resources
+#-----------------------------------------------------------------------------------------------------------------------
+resources:
+
+# Pull Request Source Code
+#-----------------------------------------------------------------------------------------------------------------------
+- name: source-code
+  type: pull-request
+  source:
+    uri: {{github_repo_uri}}
+    repo: {{github_repo}}
+    access_token: {{github_token}}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Jobs
+#-----------------------------------------------------------------------------------------------------------------------
+jobs:
+
+# Initialize
+#-----------------------------------------------------------------------------------------------------------------------
+- name: initialize
+  public: false
+  serial: true
+  plan:
+
+    - aggregate:
+
+      # Set code standards status to pending
+      - put: source-code
+        params:
+          path: source-code
+          context: code-standards
+          status: pending
+
+      # Set unit test status to pending
+      - put: source-code
+        params:
+          path: source-code
+          context: unit-tests
+          status: pending
+
+# Coding Standards
+#-----------------------------------------------------------------------------------------------------------------------
+- name: check-code-standards
+  public: false
+  serial: true
+  plan:
+
+  # Trigger code standards checks when a PR is submitted
+  - get: source-code
+    trigger: true
+
+  # Check code standards
+  - task: check-code-standards
+    file: source-code/ci/tasks/check-code-standards.yml
+
+  # Set code standards status to success
+  on_success:
+    put: source-code
+    params:
+      path: source-code
+      context: code-standards
+      status: success
+
+  # Set code standards status to failure
+  on_failure:
+    put: source-code
+    params:
+      path: source-code
+      context: code-standards
+      status: failure
+
+# Unit Tests
+#-----------------------------------------------------------------------------------------------------------------------
+- name: run-unit-tests
+  public: false
+  serial: true
+  plan:
+
+    # Trigger unit tests when a PR is submitted
+    - get: source-code
+      trigger: true
+
+    # Install test dependencies
+    - task: install-test-dependencies
+      file: source-code/ci/tasks/install-test-dependencies.yml
+
+    # Run unit tests
+    - task: unit-tests
+      file: source-code-with-dependencies/ci/tasks/run-unit-tests.yml
+
+  # Set unit test status to success
+  on_success:
+    put: source-code
+    params:
+      path: source-code
+      context: unit-tests
+      status: success
+
+  # Set unit test status to failure
+  on_failure:
+    put: source-code
+    params:
+      path: source-code
+      context: unit-tests
+      status: failure
